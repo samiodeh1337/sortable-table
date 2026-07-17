@@ -80,6 +80,22 @@ const useDragContextEvents = (
   const draggedInnerElRef = useRef<HTMLElement | null>(null)
   const draggedColCellsRef = useRef<HTMLElement[]>([])
 
+  // The drop cleanup runs 200ms late (after the snap animation). These hold that
+  // pending cleanup so a new drag can run it early instead of waiting.
+  const dropAnimTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingFinalizeRef = useRef<(() => void) | null>(null)
+
+  // Run any leftover drop cleanup right now.
+  const flushPendingDrop = useCallback(() => {
+    if (dropAnimTimeoutRef.current !== null) {
+      clearTimeout(dropAnimTimeoutRef.current)
+      dropAnimTimeoutRef.current = null
+    }
+    const finalize = pendingFinalizeRef.current
+    pendingFinalizeRef.current = null
+    if (finalize) finalize()
+  }, [])
+
   const beginDrag = useCallback(
     (
       e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>,
@@ -90,6 +106,10 @@ const useDragContextEvents = (
       if (!result) return
       const { element: draggableEl, foundHandle } = result
       if (!foundHandle && draggableEl.querySelector('[data-drag-handle]')) return
+
+      // Finish the previous drop before starting this one, so a fast second drag
+      // doesn't leave the old row hidden or get corrupted by its late cleanup.
+      flushPendingDrop()
 
       const id = draggableEl.dataset.id
       const sourceIndex = +draggableEl.dataset.index!
@@ -262,6 +282,7 @@ const useDragContextEvents = (
       cachedContainerRef,
       draggedSizeRef,
       prevTargetIndexRef,
+      flushPendingDrop,
     ],
   )
 
@@ -352,11 +373,14 @@ const useDragContextEvents = (
       const toY = parseFloat(ph.style.top) || 0
       cloneEl.style.transition = `transform ${DROP_SNAP_MS}ms cubic-bezier(0.2, 0, 0, 1)`
       cloneEl.style.transform = `translate(${toX}px, ${toY}px)`
-      setTimeout(
-        () =>
-          finalizeDrop(finalSource, finalTarget, finalDragType, savedScrollTop, savedScrollLeft),
-        DROP_SNAP_MS,
-      )
+      pendingFinalizeRef.current = () =>
+        finalizeDrop(finalSource, finalTarget, finalDragType, savedScrollTop, savedScrollLeft)
+      dropAnimTimeoutRef.current = setTimeout(() => {
+        dropAnimTimeoutRef.current = null
+        const finalize = pendingFinalizeRef.current
+        pendingFinalizeRef.current = null
+        if (finalize) finalize()
+      }, DROP_SNAP_MS)
     } else {
       finalizeDrop(finalSource, finalTarget, finalDragType, savedScrollTop, savedScrollLeft)
     }
@@ -524,7 +548,11 @@ const useDragContextEvents = (
       )
       if (dropIndex !== targetIndexRef.current) {
         targetIndexRef.current = dropIndex
-        requestAnimationFrame(() => applyShiftTransforms(sourceIndexRef.current, dropIndex, dtype))
+        requestAnimationFrame(() => {
+          // Skip if the drag already ended before this frame ran.
+          if (dragEndFiredRef.current) return
+          applyShiftTransforms(sourceIndexRef.current, dropIndex, dtype)
+        })
       }
     },
     [
@@ -551,6 +579,8 @@ const useDragContextEvents = (
   dragMoveRef.current = dragMove
 
   const dragCancel = useCallback(() => {
+    // Finish any pending drop cleanup so it can't fire after cancel.
+    flushPendingDrop()
     cancelLongPress()
     cachedItemsRef.current = null
     cachedContainerRef.current = null
@@ -576,6 +606,7 @@ const useDragContextEvents = (
     dispatch,
     stopAutoScroll,
     clearShiftTransforms,
+    flushPendingDrop,
   ])
 
   // reset clone after React re-renders isDragging:false
