@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.17 (2026-07-17)
+
+### Bug Fixes
+
+- Flush pending drop cleanup so a fast second drag (or a cancel) no longer races the ~200ms drop-snap animation timeout, which could leave the previous row hidden or corrupt drag state
+- Skip the post-shift transform frame when the drag has already ended
+
+### Chores
+
+- Bump `styled-components`, `typescript-eslint`, and `vite` devDependencies
+
 ## 1.0.0 (2025-03-14)
 
 ### Features

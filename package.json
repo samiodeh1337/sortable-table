@@ -1,6 +1,6 @@
 {
   "name": "react-table-dnd",
-  "version": "2.0.16",
+  "version": "2.0.17",
   "type": "module",
   "description": "Sortable table with draggable rows and columns",
   "main": "dist/index.cjs.js",
